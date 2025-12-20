@@ -11,6 +11,8 @@ cfg = [
     512, 512, 512, 512, 'A'
 ]
 
+features_points = [0 , 4 , 9 , 18 , 27]
+
 
 class VGG19_AvgPool(nn.Module):
     def __init__(self, num_classes=1000):
@@ -35,10 +37,12 @@ class VGG19_AvgPool(nn.Module):
 
     def forward(self, x):
         self.feature_maps = []
+        idx = 0
         for layer in self.features:
             x = layer(x)
-            if isinstance(layer , nn.AvgPool2d):
+            if idx in features_points:
                 self.feature_maps.append(x)
+            idx += 1
         # no need to classify
         return x
 
@@ -47,19 +51,14 @@ class VGG19_AvgPool(nn.Module):
         # features
         base = vgg19(weights=VGG19_Weights.IMAGENET1K_V1)
 
-        idx = 0
-        for layer in self.features:
-            if isinstance(layer , nn.Conv2d):
-                base_layer = base.features[idx]
-                while not isinstance(base_layer , nn.Conv2d):
-                    idx += 1
-                    base_layer = base.features[idx]
-                
-                layer.weight.data.copy_(base_layer.weight.data)
-                layer.bias.data.copy_(base_layer.bias.data)
-            
-            idx += 1
 
+
+        base_conv_layers = [m for m in base.features if isinstance(m, nn.Conv2d)]
+        new_conv_layers  = [m for m in self.features if isinstance(m, nn.Conv2d)]
+
+        for new, base in zip(new_conv_layers, base_conv_layers):
+            new.weight.data.copy_(base.weight.data)
+            new.bias.data.copy_(base.bias.data)
         
         # classifier, no need to load
         """
@@ -74,6 +73,7 @@ class VGG19_AvgPool(nn.Module):
             x = layer(x)
             if isinstance(layer , nn.Conv2d):
                 sum = torch.mean(x)
+                print(f"mean of weights: {sum}")
 
                 layer.weight.data.div_(sum)
                 layer.bias.data.div_(sum)
@@ -86,10 +86,9 @@ class VGG19_AvgPool(nn.Module):
                 sum = torch.mean(x)
                 print(f"mean of activations: {sum}")
 
-def get_vgg19_avgpool(device):
+def get_vgg19_avgpool(x , device):
     model = VGG19_AvgPool().to(device)
     model.load_pretrained_weight()
-    model.rescale_weight(torch.rand(10, 3, 224, 224).to(device))
     return model
 
 
@@ -98,11 +97,12 @@ if __name__ == '__main__':
     ssl._create_default_https_context = ssl._create_unverified_context 
 
     # cuda
-    #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # mac
-    device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+    #device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+
     model = VGG19_AvgPool().to(device)
     model.load_pretrained_weight()
-    model.rescale_weight(torch.rand(10, 3, 224, 224).to(device))
-    model.verify_weight(torch.rand(10, 3, 224, 224).to(device))
+    model.rescale_weight(torch.randn(10, 3, 224, 224).to(device))
+    model.verify_weight(torch.randn(10, 3, 224, 224).to(device))
 
