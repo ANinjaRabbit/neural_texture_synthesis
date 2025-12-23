@@ -3,6 +3,7 @@ import torch.nn as nn
 import cv2
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
+import Optimizer
 
 from tqdm import tqdm
 imagenet_mean = torch.tensor([0.485, 0.456, 0.406])
@@ -85,7 +86,7 @@ def synthesize_texture(model,gt, save_path ,  device , epoch = 2000 , lr = 0.01 
             if (i+1)%100 == 0:
                 save_image(syn.squeeze(0), "images/epochs/epoch_{}.jpg".format(i+1))
     elif optimizer == 'LBFGS':
-        optimizer = torch.optim.LBFGS([syn], lr=lr)
+        optimizer = Optimizer.SimpleLBFGS([syn], lr=lr)
 
         def closure():
             optimizer.zero_grad()
@@ -94,7 +95,7 @@ def synthesize_texture(model,gt, save_path ,  device , epoch = 2000 , lr = 0.01 
             loss = gram_mse_loss(syn_grams,gt_grams , device)
             loss.backward(retain_graph=True)
 
-            return loss
+            return loss.detach()
         
         for i in tqdm(range(epoch)):
 
