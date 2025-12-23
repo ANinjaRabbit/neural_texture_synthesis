@@ -5,8 +5,8 @@ import typing
 
 class SimpleLBFGS(Optimizer):
     state: typing.Dict[str, typing.Any]
-    def __init__(self, params, lr=1.0, history_size=20 , max_iter=20):
-        defaults = dict(lr=lr, history_size=history_size , max_iter=max_iter)
+    def __init__(self, params, lr=1.0, history_size=20 , max_iter=20 , tolerance_grad=1e-7 , tolerance_change=1e-9):
+        defaults = dict(lr=lr, history_size=history_size , max_iter=max_iter , tolerance_grad=tolerance_grad , tolerance_change=tolerance_change)
         super().__init__(params, defaults)
 
         self.state['n_iter'] = 0
@@ -23,34 +23,31 @@ class SimpleLBFGS(Optimizer):
             if p.grad is not None
         ])
 
-    def _gather_flat_params(self):
-        return torch.cat([
-            p.data.view(-1)
-            for group in self.param_groups
-            for p in group['params']
-        ])
-
-    def _set_flat_params(self, flat_params):
+    def _add_update(self, step_size, update):
         offset = 0
         for group in self.param_groups:
             for p in group['params']:
                 numel = p.numel()
-                p.data.copy_(flat_params[offset:offset + numel].view_as(p))
+                p.data.add_(
+                    update[offset:offset + numel].view_as(p),
+                    alpha=step_size
+                )
                 offset += numel
 
-    def _lbfgs_step_once(self, closure):
+
+
+    def step(self, closure):
         if closure is None:
             raise RuntimeError("LBFGS requires a closure")
 
         loss = closure()
-        grad = self._gather_flat_grad()
-        params = self._gather_flat_params()
-
-        state = self.state
-        lr = self.param_groups[0]['lr']
-        m = self.param_groups[0]['history_size']
 
         with torch.no_grad():
+            grad = self._gather_flat_grad()
+
+            state = self.state
+            lr = self.param_groups[0]['lr']
+            m = self.param_groups[0]['history_size']
             if state['n_iter'] == 0:
                 direction = -grad
             else:
@@ -58,16 +55,50 @@ class SimpleLBFGS(Optimizer):
 
                 direction = -direction
 
-            new_params = params + lr * direction
-            self._set_flat_params(new_params)
+                self._add_update(lr, direction)
         
-        with torch.enable_grad():
+        loss = closure()
+        prev_loss = loss
+
+        for _ in range(self.param_groups[0]['max_iter']):
+            with torch.no_grad():
+                if self.state['n_iter'] == 0:
+                    direction = -grad
+                else:
+                    direction = -self._two_loop_recursion(grad)
+
+                self._add_update(lr, direction)
+
             loss = closure()
+            new_grad = self._gather_flat_grad()
+
+            if new_grad.norm() < self.param_groups[0]['tolerance_grad']:
+                break
+
+            if abs(loss.detach() - prev_loss) < self.param_groups[0]['tolerance_change']:
+                break
+
+            # update history
+            s = lr * direction
+            y = new_grad - grad
+
+            if torch.dot(s, y) > 1e-10:
+                self.state['s_history'].append(s)
+                self.state['y_history'].append(y)
+
+                if len(self.state['s_history']) > m:
+                    self.state['s_history'].pop(0)
+                    self.state['y_history'].pop(0)
+
+            grad = new_grad
+            prev_loss = loss
+            self.state['n_iter'] += 1
+
         
         with torch.no_grad():
             new_grad = self._gather_flat_grad()
 
-            s = new_params - params
+            s = direction * self.param_groups[0]['lr']
             y = new_grad - grad
 
             if torch.dot(s, y) > 1e-10:
@@ -82,11 +113,6 @@ class SimpleLBFGS(Optimizer):
 
         return loss
 
-    def step(self, closure):
-        max_iter = self.param_groups[0]['max_iter']
-        for _ in range(max_iter):
-            loss = self._lbfgs_step_once(closure)
-        return loss
 
     def _two_loop_recursion(self, grad):
         s_list = self.state['s_history']
