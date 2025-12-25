@@ -59,7 +59,7 @@ def save_image(tensor, file_name):
 
 
 
-def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epoch = 2000 , lr = 0.01 , optimizer = 'LBFGS'):
+def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epochs = 2000 , lr = 0.01 , optimizer = 'LBFGS'):
 
 
     model.to(device)
@@ -68,14 +68,14 @@ def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epo
     syn = torch.randn(gt.shape)
     syn = syn.to(device).requires_grad_(True)
 
-    model(gt)
+    model(gt , layers)
     gt_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
 
     if optimizer == 'Adam':
         optimizer = torch.optim.Adam([syn], lr=lr)
-        for i in tqdm(range(epoch)):
+        for i in tqdm(range(epochs)):
             optimizer.zero_grad()
-            model(syn)
+            model(syn , layers)
             syn_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
             loss = gram_mse_loss(syn_grams,gt_grams , device)
             loss.backward(retain_graph=True)
@@ -91,14 +91,14 @@ def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epo
 
         def closure():
             optimizer.zero_grad()
-            model(syn)
+            model(syn , layers)
             syn_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
             loss = gram_mse_loss(syn_grams,gt_grams , device)
             loss.backward(retain_graph=True)
 
             return loss.detach()
         
-        for i in tqdm(range(epoch)):
+        for i in tqdm(range(epochs)):
 
             loss = optimizer.step(closure)
 
