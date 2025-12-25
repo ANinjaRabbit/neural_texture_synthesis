@@ -5,7 +5,7 @@ import typing
 
 class SimpleLBFGS(Optimizer):
     state: typing.Dict[str, typing.Any]
-    def __init__(self, params, lr=1.0, history_size=20 , max_iter=20 , tolerance_grad=1e-7 , tolerance_change=1e-9):
+    def __init__(self, params, lr=1.0, history_size=20 , max_iter=10 , tolerance_grad=1e-7 , tolerance_change=1e-9):
         defaults = dict(lr=lr, history_size=history_size , max_iter=max_iter , tolerance_grad=tolerance_grad , tolerance_change=tolerance_change)
         super().__init__(params, defaults)
 
