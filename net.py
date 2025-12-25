@@ -59,7 +59,7 @@ def save_image(tensor, file_name):
 
 
 
-def synthesize_texture(model,gt, save_path ,  device , epoch = 2000 , lr = 0.01 , optimizer = 'LBFGS'):
+def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epoch = 2000 , lr = 0.01 , optimizer = 'LBFGS'):
 
 
     model.to(device)
@@ -83,7 +83,8 @@ def synthesize_texture(model,gt, save_path ,  device , epoch = 2000 , lr = 0.01 
             optimizer.step()
 
 
-            if (i+1)%100 == 0:
+            if save_epoch != 0 and (i+1)%save_epoch == 0:
+                tqdm.write(f"loss: {loss.item()}")
                 save_image(syn.squeeze(0), "images/epochs/epoch_{}.jpg".format(i+1))
     elif optimizer == 'LBFGS':
         optimizer = Optimizer.SimpleLBFGS([syn], lr=lr)
@@ -102,8 +103,8 @@ def synthesize_texture(model,gt, save_path ,  device , epoch = 2000 , lr = 0.01 
             loss = optimizer.step(closure)
 
 
-            if (i+1)%100 == 0:
-                print(f"loss: {loss.item()}")
+            if save_epoch != 0 and (i+1)%save_epoch == 0:
+                tqdm.write(f"loss: {loss.item()}")
                 save_image(syn.squeeze(0), "images/epochs/epoch_{}.jpg".format(i+1))
     else:
         raise NotImplementedError

@@ -11,8 +11,29 @@ cfg = [
     512, 512, 512, 512, 'A'
 ]
 
-features_points = [0 , 4 , 9 , 18 , 27]
-
+layers_dict = {
+    'conv1_1': 1,
+    'conv1_2': 3,
+    'pool1': 4,
+    'conv2_1': 6,
+    'conv2_2': 8,
+    'pool2': 9,
+    'conv3_1': 11,
+    'conv3_2': 13,
+    'conv3_3': 15,
+    'conv3_4': 17,
+    'pool3': 18,
+    'conv4_1': 20,
+    'conv4_2': 22,
+    'conv4_3': 24,
+    'conv4_4': 26,
+    'pool4': 27,
+    'conv5_1': 29,
+    'conv5_2': 31,
+    'conv5_3': 33,
+    'conv5_4': 35,
+    'pool5': 36,
+}
 
 class VGG19_AvgPool(nn.Module):
     def __init__(self, num_classes=1000):
@@ -35,12 +56,14 @@ class VGG19_AvgPool(nn.Module):
                 in_channels = v
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x , layers):
         self.feature_maps = []
         idx = 0
+        layers_idx = [layers_dict[layer] for layer in layers]
+
         for layer in self.features:
             x = layer(x)
-            if idx in features_points:
+            if idx in layers_idx:
                 self.feature_maps.append(x)
             idx += 1
         # no need to classify
@@ -90,19 +113,3 @@ def get_vgg19_avgpool(x , device):
     model = VGG19_AvgPool().to(device)
     model.load_pretrained_weight()
     return model
-
-
-if __name__ == '__main__':
-    # disable ssl verification
-    ssl._create_default_https_context = ssl._create_unverified_context 
-
-    # cuda
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # mac
-    #device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-
-    model = VGG19_AvgPool().to(device)
-    model.load_pretrained_weight()
-    model.rescale_weight(torch.randn(10, 3, 224, 224).to(device))
-    model.verify_weight(torch.randn(10, 3, 224, 224).to(device))
-
