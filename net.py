@@ -43,6 +43,7 @@ def read_image(path):
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=imagenet_mean, std=imagenet_std),
+        transforms.Resize((224,224)),
     ])
     image = cv2.imread(path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
