@@ -1,3 +1,4 @@
+import contextlib
 import torch
 import torch.nn as nn
 import cv2
@@ -26,7 +27,7 @@ def calculate_gram(input):
     assert len(input.shape)==4
 
     batch_size,channels,H,W=input.shape
-    feature=input.view(batch_size , channels,H*W)
+    feature=input.view(batch_size , channels,H*W).to(torch.float32)
     G = torch.matmul(feature, feature.transpose(1, 2))
     G.div_(H*W)
     return G
@@ -43,6 +44,7 @@ def read_image(path):
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=imagenet_mean, std=imagenet_std),
+        # TODO (yxy): Why resize? CNNs should handle arbitrary sizes.
         transforms.Resize((224,224)),
     ])
     image = cv2.imread(path)
@@ -60,7 +62,7 @@ def save_image(tensor, file_name):
 
 
 
-def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epochs = 2000 , lr = 0.01 , optimizer = 'LBFGS'):
+def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epochs = 2000 , lr = 0.01 , optimizer = 'LBFGS', bf16=False):
 
 
     model.to(device)
@@ -70,16 +72,26 @@ def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epo
     syn = syn.to(device).requires_grad_(True)
 
     model(gt , layers)
-    gt_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
+    with torch.no_grad():
+        gt_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
+    
+    autocast_ctx = (
+        torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16)
+        if bf16
+        else contextlib.nullcontext()
+    )
 
     if optimizer == 'Adam':
         optimizer = torch.optim.Adam([syn], lr=lr)
         for i in tqdm(range(epochs)):
             optimizer.zero_grad()
-            model(syn , layers)
-            syn_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
-            loss = gram_mse_loss(syn_grams,gt_grams , device)
-            loss.backward(retain_graph=True)
+            with autocast_ctx:
+                model(syn , layers)
+                syn_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
+                loss = gram_mse_loss(syn_grams,gt_grams , device)
+
+            # loss.backward(retain_graph=True)
+            loss.backward()
 
             optimizer.step()
 
@@ -92,10 +104,13 @@ def synthesize_texture(model,gt, save_path ,  device , layers , save_epoch , epo
 
         def closure():
             optimizer.zero_grad()
-            model(syn , layers)
-            syn_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
-            loss = gram_mse_loss(syn_grams,gt_grams , device)
-            loss.backward(retain_graph=True)
+            with autocast_ctx:
+                model(syn , layers)
+                syn_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
+                loss = gram_mse_loss(syn_grams,gt_grams , device)
+
+            # loss.backward(retain_graph=True)
+            loss.backward()
 
             return loss.detach()
         
