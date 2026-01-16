@@ -7,7 +7,6 @@ from torch.nn import functional as F
 import contextlib
 import tqdm
 
-
 def synthesize_texture(
     model: VGG19_AvgPool,
     sample: torch.Tensor,

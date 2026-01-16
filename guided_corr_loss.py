@@ -9,7 +9,8 @@ def cosine_dist(A: torch.Tensor, B: torch.Tensor):
     B = B - torch.mean(B, dim=2, keepdim=True)
     A = F.normalize(A, dim=1)
     B = F.normalize(B, dim=1)
-    dist = 1 - (A.transpose(1, 2) @ B)
+    # dist = 1 - A.transpose(1, 2) @ B
+    dist = 1 - (A.transpose(1, 2).to(torch.float16) @ B.to(torch.float16)).to(torch.float32)
     return dist.clamp(min=0)
 
 
@@ -52,11 +53,6 @@ def guided_corr_dist(
     NP2 = ref_patches.shape[2]
 
     dist = cosine_dist(tgt_patches, ref_patches)
-    # if dist.nelement() <= 400:
-    #     print(f'{dist=}')
-    # print(f'{dist.shape=}')
-    dist_min = dist.amin(dim=2)
-    # print(f'{NP1=} {NP2=} dist: avg {dist_min.mean().item()}, std {dist_min.std(correction=0).item()}')
 
     with torch.no_grad():
         n_match = torch.zeros((N, NP2), device=tgt_patches.device, dtype=torch.float32)
@@ -66,11 +62,13 @@ def guided_corr_dist(
             torch.ones(dist.shape[:2], device=tgt_patches.device, dtype=torch.float32),
         )
         avg_match = NP1 / NP2
-        dist += coef_occur * n_match.unsqueeze(0) / avg_match
+        occurrence_penalty = (coef_occur / avg_match) * n_match.unsqueeze(0)
+
+    dist += occurrence_penalty
 
     return dist
 
-
+@torch.compile
 def guided_corr_loss(
     tgt_feat: torch.Tensor,
     ref_feat: torch.Tensor,
@@ -101,11 +99,9 @@ def guided_corr_loss(
 
     tgt_patches = sample_patches(tgt_feat, size, stride, max_patches)
     ref_patches = sample_patches(ref_feat, size, stride, max_patches)
-    # print(f'n_patch: tgt {tgt_patches.shape[2]}, ref {ref_patches.shape[2]} channels {tgt_patches.shape[1]} dtype {tgt_patches.dtype}')
 
     dist = guided_corr_dist(tgt_patches, ref_patches, coef_occur)
 
-    # dist = guided_corr_dist(ref_feat, tgt_feat, size, stride, coef_occ)
     w = torch.exp((1 - dist / (torch.amin(dist, dim=2, keepdim=True) + eps)) / h)
     cx = w / torch.sum(w, dim=2, keepdim=True)
     loss = torch.mean(-torch.log(torch.amax(cx, dim=2)))
