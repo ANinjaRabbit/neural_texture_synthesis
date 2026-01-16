@@ -56,7 +56,7 @@ class VGG19_AvgPool(nn.Module):
     def __init__(self, num_classes=1000):
         super().__init__()
         self.features = self._make_layers(cfg)
-        self.feature_maps = []
+        self.feature_maps: list[torch.Tensor] = []
 
     def _make_layers(self, cfg):
         layers = []

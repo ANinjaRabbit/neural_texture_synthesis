@@ -5,9 +5,11 @@ import torch.nn.functional as F
 
 def cosine_dist(A: torch.Tensor, B: torch.Tensor):
     """A, B are [N, C, NP]"""
-    A = F.normalize(A, dim=2)
-    B = F.normalize(B, dim=2)
-    dist = 1 - A.transpose(1, 2) @ B
+    A = A - torch.mean(A, dim=2, keepdim=True)
+    B = B - torch.mean(B, dim=2, keepdim=True)
+    A = F.normalize(A, dim=1)
+    B = F.normalize(B, dim=1)
+    dist = 1 - (A.transpose(1, 2) @ B)
     return dist.clamp(min=0)
 
 
@@ -32,8 +34,6 @@ def sample_patches(feat: torch.Tensor, size: int, stride: int, max_patches: int)
 def guided_corr_dist(
     tgt_patches: torch.Tensor,
     ref_patches: torch.Tensor,
-    size: int,
-    stride: int,
     coef_occur: float,
 ) -> torch.Tensor:
     """Calculate the patch guided correspondence distance of reference and target features.
@@ -47,12 +47,28 @@ def guided_corr_dist(
         The distance matrix of size: [N, NP1, NP2], where NP1 and NP2 are the number
         of patches in the reference and target image.
     """
-    # Create patch features of shape [N, C * size * size, NP]
-    assert coef_occur == 0, "Occurrence penalty is not yet supported."
+    N = tgt_patches.shape[0]
+    NP1 = tgt_patches.shape[2]
+    NP2 = ref_patches.shape[2]
 
-    cos_dist = cosine_dist(tgt_patches, ref_patches)
+    dist = cosine_dist(tgt_patches, ref_patches)
+    # if dist.nelement() <= 400:
+    #     print(f'{dist=}')
+    # print(f'{dist.shape=}')
+    dist_min = dist.amin(dim=2)
+    # print(f'{NP1=} {NP2=} dist: avg {dist_min.mean().item()}, std {dist_min.std(correction=0).item()}')
 
-    return cos_dist
+    with torch.no_grad():
+        n_match = torch.zeros((N, NP2), device=tgt_patches.device, dtype=torch.float32)
+        n_match.scatter_add_(
+            1,
+            torch.argmin(dist, dim=2),
+            torch.ones(dist.shape[:2], device=tgt_patches.device, dtype=torch.float32),
+        )
+        avg_match = NP1 / NP2
+        dist += coef_occur * n_match.unsqueeze(0) / avg_match
+
+    return dist
 
 
 def guided_corr_loss(
@@ -66,6 +82,7 @@ def guided_corr_loss(
     max_patches: int = 10000,
 ):
     """Calculate the patch guided correspondence loss of reference and target features.
+    If the patch size is larger than the feature map size, no loss is calculated and 0 is returned.
     Args:
         tgt_feat: [N, C, H, W], the feature map of the target image.
                   Can be the activation of a layer in VGG.
@@ -79,14 +96,18 @@ def guided_corr_loss(
     Returns:
         A scalar Tensor of the mean loss of the batch.
     """
+    if min(*tgt_feat.shape[2:], *ref_feat.shape[2:]) < size:
+        return torch.tensor(0.0, device=tgt_feat.device)
+
     tgt_patches = sample_patches(tgt_feat, size, stride, max_patches)
     ref_patches = sample_patches(ref_feat, size, stride, max_patches)
+    # print(f'n_patch: tgt {tgt_patches.shape[2]}, ref {ref_patches.shape[2]} channels {tgt_patches.shape[1]} dtype {tgt_patches.dtype}')
 
-    dist = guided_corr_dist(tgt_patches, ref_patches, size, stride, coef_occur)
+    dist = guided_corr_dist(tgt_patches, ref_patches, coef_occur)
 
     # dist = guided_corr_dist(ref_feat, tgt_feat, size, stride, coef_occ)
-    w = torch.exp((1 - dist / (torch.min(dist, dim=2, keepdim=True) + eps)) / h)
+    w = torch.exp((1 - dist / (torch.amin(dist, dim=2, keepdim=True) + eps)) / h)
     cx = w / torch.sum(w, dim=2, keepdim=True)
-    loss = torch.mean(-torch.log(torch.max(cx, dim=2)))
+    loss = torch.mean(-torch.log(torch.amax(cx, dim=2)))
 
     return loss

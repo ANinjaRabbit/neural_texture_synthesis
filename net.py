@@ -44,16 +44,18 @@ def gram_mse_loss(syn, gt, device):
     return total_loss
 
 
-def read_image(path):
+def read_image(path, resize=True):
     transform = transforms.Compose(
         [
             transforms.ToTensor(),
             transforms.Normalize(mean=imagenet_mean, std=imagenet_std),
             # TODO (yxy): Why resize? CNNs should handle arbitrary sizes.
-            transforms.Resize((224, 224)),
+            transforms.Resize((224, 224)) if resize else transforms.Lambda(lambda x: x),
         ]
     )
     image = cv2.imread(path)
+    if image is None:
+        raise FileNotFoundError(f"Image not found: {path}")
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image = transform(image)
     image = image.unsqueeze(0)
@@ -91,7 +93,7 @@ def synthesize_texture(
         gt_grams = [calculate_gram(fmap) for fmap in model.feature_maps]
 
     autocast_ctx = (
-        torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16)
+        torch.autocast(device_type=device.type, dtype=torch.bfloat16)
         if bf16
         else contextlib.nullcontext()
     )
