@@ -1,0 +1,13 @@
+name: neural-texture
+channels:
+  - conda-forge
+dependencies:
+  - pytorch
+  - opencv
+  - torchvision
+  - tqdm
+  - ruff
+  - scipy
+  - matplotlib
+  - ipython
+  - cuda-toolkit
