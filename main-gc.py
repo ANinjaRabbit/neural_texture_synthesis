@@ -13,6 +13,7 @@ def ensure_dir(path):
 
 
 def main():
+    torch.set_float32_matmul_precision('high')
     parser = argparse.ArgumentParser(description="Neural Texture Synthesis with Guided Correspondence")
     
     # Basic I/O (保持与原有main.py一致)

@@ -37,7 +37,7 @@ def annotation_dist(A: torch.Tensor, B: torch.Tensor):
     return dist / (A.shape[1] + 1e-8)
 
 
-def sample_patches(feat: torch.Tensor, size: int, stride: int, max_patches: int):
+def sample_patches(feat: torch.Tensor, size: int, stride: int, max_patches: int, indices=None):
     """Sample patches from feature map.
     Args:
         feat: [N, C, H, W]
@@ -49,9 +49,10 @@ def sample_patches(feat: torch.Tensor, size: int, stride: int, max_patches: int)
     """
     patches = F.unfold(feat, kernel_size=size, stride=stride)
     if patches.shape[2] > max_patches:
-        indices = torch.randperm(patches.shape[2])[:max_patches]
+        if indices is None:
+            indices = torch.randperm(patches.shape[2])[:max_patches]
         patches = patches[:, :, indices]
-    return patches
+    return patches, indices
 
 
 def guided_corr_dist(
@@ -111,7 +112,7 @@ def guided_corr_dist(
 
     return dist
 
-
+@torch.compile
 def guided_corr_loss(
     tgt_feat: torch.Tensor,
     ref_feat: torch.Tensor,
@@ -146,10 +147,10 @@ def guided_corr_loss(
     # Check if feature maps are large enough
     if min(*tgt_feat.shape[2:], *ref_feat.shape[2:]) < size:
         return torch.tensor(0.0, device=tgt_feat.device)
-
+    
     # 1. Sample feature patches
-    tgt_feat_patches = sample_patches(tgt_feat, size, stride, max_patches)
-    ref_feat_patches = sample_patches(ref_feat, size, stride, max_patches)
+    tgt_feat_patches, tgt_indices = sample_patches(tgt_feat, size, stride, max_patches)
+    ref_feat_patches, ref_indices = sample_patches(ref_feat, size, stride, max_patches)
 
     # 2. Handle annotation maps if provided
     tgt_label_patches = None
@@ -170,8 +171,8 @@ def guided_corr_loss(
         ).long()
 
         # Sample annotation patches
-        tgt_label_patches = sample_patches(tgt_label_resized.float(), size, stride, max_patches)
-        ref_label_patches = sample_patches(ref_label_resized.float(), size, stride, max_patches)
+        tgt_label_patches, _ = sample_patches(tgt_label_resized.float(), size, stride, max_patches, tgt_indices)
+        ref_label_patches, _ = sample_patches(ref_label_resized.float(), size, stride, max_patches, ref_indices)
 
     # 4. Compute guided distance
     dist = guided_corr_dist(
