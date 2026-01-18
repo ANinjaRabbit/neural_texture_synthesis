@@ -7,6 +7,7 @@ from torch.nn import functional as F
 import contextlib
 import tqdm
 
+
 def synthesize_texture(
     model: VGG19_AvgPool,
     sample: torch.Tensor,
@@ -14,7 +15,7 @@ def synthesize_texture(
     device: torch.device,
     layers,
     save_epoch,
-    epochs=2000,
+    epochs: list[int],
     lr=0.01,
     optimizer="Adam",
     bf16=False,
@@ -22,6 +23,8 @@ def synthesize_texture(
     scales=[0.25, 0.5, 0.75, 1.0],
     patch_size=7,
     patch_stride=3,
+    coef_occur=0.05,
+    color_bias: tuple[float, float, float] | None = None,
 ):
     """Synthesize texture using guided correspondence loss.
     Args:
@@ -41,7 +44,9 @@ def synthesize_texture(
         else contextlib.nullcontext()
     )
 
-    for scale in scales:
+    torch.manual_seed(0)
+
+    for scale_idx, scale in enumerate(scales):
         # Synthesize texture at different scales. Resample the example and target
         # image accordingly.
 
@@ -50,6 +55,11 @@ def synthesize_texture(
             int(sample.shape[2] * scale),
             int(sample.shape[3] * scale),
         )
+
+        if min(*target_scaled_size, *sample_scaled_size) < 32:
+            print("Scale too small, skipping.")
+            continue
+
         example_scaled = F.interpolate(
             sample,
             size=sample_scaled_size,
@@ -60,9 +70,14 @@ def synthesize_texture(
 
         # Create or upsample synthesized image from last step.
         if syn is None:
-            syn = torch.randn(
-                (1, 3) + target_scaled_size, device=device, requires_grad=True
-            )
+            with torch.no_grad():
+                syn = torch.randn((1, 3) + target_scaled_size, device=device)
+                if color_bias is not None:
+                    color_bias_tensor = torch.tensor(color_bias, device=device).view(
+                        1, 3, 1, 1
+                    )
+                    syn = syn * 0.1 + color_bias_tensor
+            syn.requires_grad_()
         else:
             syn = (
                 F.interpolate(
@@ -77,6 +92,8 @@ def synthesize_texture(
             )
         optim = torch.optim.Adam([syn], lr=lr)
 
+        lr_schedule = None
+
         # Calculate example feature maps.
         with torch.no_grad():
             model(example_scaled, layers)
@@ -87,7 +104,7 @@ def synthesize_texture(
             f"Optimize with scale {scale}, sample size {example_scaled.shape[1:]}, synthesize size {target_scaled_size}"
         )
 
-        for i in range(epochs):
+        for i in range(epochs[scale_idx]):
             optim.zero_grad()
             with autocast_ctx:
                 model(syn, layers)
@@ -99,14 +116,17 @@ def synthesize_texture(
                         ref_feat,
                         patch_size,
                         patch_stride,
-                        coef_occur=0.05,
+                        coef_occur=coef_occur,
                         h=1.0,
                     )
 
             loss.backward()
             optim.step()
-            print(f"Epoch {i + 1}/{epochs}, Loss: {loss.item():.4f}")
+            print(f"Epoch {i + 1}/{epochs[scale_idx]}, Loss: {loss.item():.4f}")
+            if lr_schedule is not None:
+                lr_schedule.step()
 
     assert syn is not None
 
+    print(f"Saving to {save_path}")
     save_image(syn.squeeze(0), save_path)

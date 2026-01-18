@@ -10,7 +10,9 @@ def cosine_dist(A: torch.Tensor, B: torch.Tensor):
     A = F.normalize(A, dim=1)
     B = F.normalize(B, dim=1)
     # dist = 1 - A.transpose(1, 2) @ B
-    dist = 1 - (A.transpose(1, 2).to(torch.float16) @ B.to(torch.float16)).to(torch.float32)
+    dist = 1 - (A.transpose(1, 2).to(torch.float16) @ B.to(torch.float16)).to(
+        torch.float32
+    )
     return dist.clamp(min=0)
 
 
@@ -68,6 +70,7 @@ def guided_corr_dist(
 
     return dist
 
+
 @torch.compile
 def guided_corr_loss(
     tgt_feat: torch.Tensor,
@@ -77,7 +80,7 @@ def guided_corr_loss(
     coef_occur: float,
     h: float = 0.5,
     eps: float = 1e-5,
-    max_patches: int = 10000,
+    max_patches: int = 8192,
 ):
     """Calculate the patch guided correspondence loss of reference and target features.
     If the patch size is larger than the feature map size, no loss is calculated and 0 is returned.
